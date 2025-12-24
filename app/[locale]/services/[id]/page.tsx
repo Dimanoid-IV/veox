@@ -48,9 +48,16 @@ export default function ServiceCategoryPage() {
     if (error) {
       console.error("Error loading performers:", error);
     } else {
-      setPerformers(
-        (data || []).filter((p) => p.performer_profile !== null)
-      );
+      const performers = (data || [])
+        .filter((p: any) => p.performer_profile && Array.isArray(p.performer_profile) && p.performer_profile.length > 0)
+        .map((p: any) => ({
+          id: p.id,
+          full_name: p.full_name,
+          phone: p.phone,
+          email: p.email,
+          performer_profile: Array.isArray(p.performer_profile) ? p.performer_profile[0] : p.performer_profile,
+        })) as Performer[];
+      setPerformers(performers);
     }
     setLoading(false);
   };
