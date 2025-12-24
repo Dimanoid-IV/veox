@@ -60,54 +60,52 @@ export const emailTemplates = {
     },
   }[locale],
 
-  newOffer: (locale?: "ru" | "et", orderTitle?: string, offerPrice?: number, orderId?: string) => {
-    const loc = locale || "ru";
+  newOffer: (locale: "ru" | "et" = "ru", orderTitle: string = "", offerPrice?: number, orderId: string = "") => {
     const templates = {
       ru: {
-        subject: `Новое предложение на ваш заказ: ${orderTitle || ""}`,
+        subject: `Новое предложение на ваш заказ: ${orderTitle}`,
         html: `
           <h1>Новое предложение!</h1>
-          <p>Исполнитель откликнулся на ваш заказ "${orderTitle || ""}".</p>
+          <p>Исполнитель откликнулся на ваш заказ "${orderTitle}".</p>
           ${offerPrice ? `<p>Предложенная цена: <strong>${offerPrice}€</strong></p>` : ""}
-          <a href="${process.env.NEXT_PUBLIC_APP_URL}/ru/orders/${orderId || ""}">Посмотреть предложение</a>
+          <a href="${process.env.NEXT_PUBLIC_APP_URL}/ru/orders/${orderId}">Посмотреть предложение</a>
         `,
       },
       et: {
-        subject: `Uus pakkumine teie tellimusele: ${orderTitle || ""}`,
+        subject: `Uus pakkumine teie tellimusele: ${orderTitle}`,
         html: `
           <h1>Uus pakkumine!</h1>
-          <p>Täitja vastas teie tellimusele "${orderTitle || ""}".</p>
+          <p>Täitja vastas teie tellimusele "${orderTitle}".</p>
           ${offerPrice ? `<p>Pakutud hind: <strong>${offerPrice}€</strong></p>` : ""}
-          <a href="${process.env.NEXT_PUBLIC_APP_URL}/et/orders/${orderId || ""}">Vaata pakkumist</a>
+          <a href="${process.env.NEXT_PUBLIC_APP_URL}/et/orders/${orderId}">Vaata pakkumist</a>
         `,
       },
     };
-    return templates[loc];
+    return templates[locale];
   },
 
-  offerAccepted: (locale?: "ru" | "et", orderTitle?: string, orderId?: string) => {
-    const loc = locale || "ru";
+  offerAccepted: (locale: "ru" | "et" = "ru", orderTitle: string = "", orderId: string = "") => {
     const templates = {
       ru: {
-      subject: `Ваше предложение принято: ${orderTitle || ""}`,
-      html: `
-        <h1>Предложение принято!</h1>
-        <p>Заказчик принял ваше предложение на заказ "${orderTitle || ""}".</p>
-        <p>Теперь вы можете получить контакты заказчика и связаться с ним.</p>
-        <a href="${process.env.NEXT_PUBLIC_APP_URL}/ru/orders/${orderId || ""}">Посмотреть заказ</a>
-      `,
-    },
-    et: {
-      subject: `Teie pakkumine on vastu võetud: ${orderTitle || ""}`,
-      html: `
-        <h1>Pakkumine vastu võetud!</h1>
-        <p>Klient võttis vastu teie pakkumise tellimusele "${orderTitle || ""}".</p>
-        <p>Nüüd saate saada kliendi kontaktid ja temaga ühendust võtta.</p>
-        <a href="${process.env.NEXT_PUBLIC_APP_URL}/et/orders/${orderId || ""}">Vaata tellimust</a>
-      `,
-    },
+        subject: `Ваше предложение принято: ${orderTitle}`,
+        html: `
+          <h1>Предложение принято!</h1>
+          <p>Заказчик принял ваше предложение на заказ "${orderTitle}".</p>
+          <p>Теперь вы можете получить контакты заказчика и связаться с ним.</p>
+          <a href="${process.env.NEXT_PUBLIC_APP_URL}/ru/orders/${orderId}">Посмотреть заказ</a>
+        `,
+      },
+      et: {
+        subject: `Teie pakkumine on vastu võetud: ${orderTitle}`,
+        html: `
+          <h1>Pakkumine vastu võetud!</h1>
+          <p>Klient võttis vastu teie pakkumise tellimusele "${orderTitle}".</p>
+          <p>Nüüd saate saada kliendi kontaktid ja temaga ühendust võtta.</p>
+          <a href="${process.env.NEXT_PUBLIC_APP_URL}/et/orders/${orderId}">Vaata tellimust</a>
+        `,
+      },
     };
-    return templates[loc];
+    return templates[locale];
   },
 
   reviewReminder: (locale: "ru" | "et" = "ru", orderTitle: string, orderId: string) => ({
