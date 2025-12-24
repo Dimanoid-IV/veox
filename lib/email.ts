@@ -60,7 +60,7 @@ export const emailTemplates = {
     },
   }[locale],
 
-  newOffer: (locale: "ru" | "et" = "ru", orderTitle: string = "", offerPrice?: number, orderId: string = "") => {
+  newOffer: (locale: "ru" | "et" = "ru", orderTitle: string = "", orderId: string = "", offerPrice?: number) => {
     const templates = {
       ru: {
         subject: `Новое предложение на ваш заказ: ${orderTitle}`,

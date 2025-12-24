@@ -30,9 +30,9 @@ export async function POST(request: Request) {
       case "new_offer":
         emailContent = emailTemplates.newOffer(
           locale as "ru" | "et",
-          data.orderTitle,
-          data.offerPrice || 0,
-          data.orderId
+          data.orderTitle || "",
+          data.orderId || "",
+          data.offerPrice
         );
         break;
       case "offer_accepted":
