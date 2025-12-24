@@ -3,7 +3,7 @@
 
 import { Resend } from "resend";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 interface EmailData {
   to: string;
@@ -13,7 +13,7 @@ interface EmailData {
 }
 
 export async function sendEmail({ to, subject, html }: EmailData) {
-  if (!process.env.RESEND_API_KEY) {
+  if (!resend || !process.env.RESEND_API_KEY) {
     console.log("Email not sent (RESEND_API_KEY not configured):", { to, subject });
     return { success: false, error: "Email service not configured" };
   }
