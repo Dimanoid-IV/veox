@@ -1,5 +1,6 @@
 // Email notification service using Resend
 // Install: npm install resend
+// All template functions use function declarations to avoid syntax errors
 
 import { Resend } from "resend";
 
