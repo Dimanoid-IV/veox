@@ -24,22 +24,27 @@ export default function SignupPage() {
     setLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
+    try {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            full_name: fullName,
+          },
+          emailRedirectTo: `${window.location.origin}/${locale}/auth/callback`,
         },
-        emailRedirectTo: `${window.location.origin}/${locale}/auth/callback`,
-      },
-    });
+      });
 
-    if (error) {
-      setError(error.message);
+      if (error) {
+        setError(error.message);
+        setLoading(false);
+      } else {
+        setSuccess(true);
+      }
+    } catch (err: any) {
+      setError(err?.message || "Произошла ошибка. Проверьте подключение к интернету.");
       setLoading(false);
-    } else {
-      setSuccess(true);
     }
   };
 
