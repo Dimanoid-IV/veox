@@ -5,18 +5,26 @@ export function createClient() {
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    // Return a mock client that won't crash the app
-    // This allows the app to work without Supabase configured (for initial deployment)
-    console.warn(
-      "Supabase environment variables not configured. Some features may not work."
+    console.error(
+      "Supabase environment variables not configured. Please set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY"
     );
-    // Return a minimal mock client
+    // Return a client with placeholder values to prevent crashes
+    // Requests will fail but won't crash the app
     return createBrowserClient(
       supabaseUrl || "https://placeholder.supabase.co",
-      supabaseAnonKey || "placeholder-key"
+      supabaseAnonKey || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
     );
   }
 
-  return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  try {
+    return createBrowserClient(supabaseUrl, supabaseAnonKey);
+  } catch (error) {
+    console.error("Error creating Supabase client:", error);
+    // Return a placeholder client to prevent crashes
+    return createBrowserClient(
+      "https://placeholder.supabase.co",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+    );
+  }
 }
 
