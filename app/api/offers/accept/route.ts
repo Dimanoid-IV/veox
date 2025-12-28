@@ -1,135 +1,120 @@
-import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: { user } } = await supabase.auth.getUser();
 
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { offerId, orderId } = await request.json();
+    const body = await request.json();
+    const { offer_id } = body;
 
-    // Get order and verify customer ownership
-    const { data: order, error: orderError } = await supabase
-      .from("orders")
-      .select("id, customer_id, status")
-      .eq("id", orderId)
-      .single();
-
-    if (orderError || !order) {
-      return NextResponse.json({ error: "Order not found" }, { status: 404 });
-    }
-
-    if (order.customer_id !== user.id) {
+    if (!offer_id) {
       return NextResponse.json(
-        { error: "Only order owner can accept offers" },
-        { status: 403 }
-      );
-    }
-
-    if (order.status !== "open") {
-      return NextResponse.json(
-        { error: "Order is not open" },
+        { error: "offer_id is required" },
         { status: 400 }
       );
     }
 
-    // Get offer details
+    // Get offer with order info
     const { data: offer, error: offerError } = await supabase
       .from("offers")
-      .select("id, performer_id, status, order_id")
-      .eq("id", offerId)
-      .eq("order_id", orderId)
+      .select(`
+        *,
+        order:orders!inner(id, customer_id, title)
+      `)
+      .eq("id", offer_id)
       .single();
 
     if (offerError || !offer) {
-      return NextResponse.json({ error: "Offer not found" }, { status: 404 });
-    }
-
-    if (offer.status !== "pending") {
       return NextResponse.json(
-        { error: "Offer is not pending" },
-        { status: 400 }
+        { error: "Offer not found" },
+        { status: 404 }
       );
     }
 
-    // Start transaction: accept this offer and reject others
-    // Accept the selected offer
-    const { error: acceptError } = await supabase
-      .from("offers")
-      .update({ status: "accepted", updated_at: new Date().toISOString() })
-      .eq("id", offerId);
-
-    if (acceptError) {
-      console.error("Error accepting offer:", acceptError);
+    // Check if user is the customer for this order
+    if (offer.order.customer_id !== user.id) {
       return NextResponse.json(
-        { error: "Failed to accept offer" },
-        { status: 500 }
+        { error: "Only the order customer can accept offers" },
+        { status: 403 }
       );
     }
 
     // Reject all other offers for this order
     await supabase
       .from("offers")
-      .update({ status: "rejected", updated_at: new Date().toISOString() })
-      .eq("order_id", orderId)
-      .neq("id", offerId)
-      .eq("status", "pending");
+      .update({ status: "rejected" })
+      .eq("order_id", offer.order_id)
+      .neq("id", offer_id);
 
-    // Update order status to in_progress
+    // Accept this offer
+    const { error: updateError } = await supabase
+      .from("offers")
+      .update({ status: "accepted" })
+      .eq("id", offer_id);
+
+    if (updateError) {
+      console.error("Error accepting offer:", updateError);
+      return NextResponse.json(
+        { error: "Failed to accept offer" },
+        { status: 500 }
+      );
+    }
+
+    // Update order status
     await supabase
       .from("orders")
-      .update({ status: "in_progress", updated_at: new Date().toISOString() })
-      .eq("id", orderId);
+      .update({ status: "in_progress" })
+      .eq("id", offer.order_id);
 
     // Create notification for performer
+    const { data: performerProfile } = await supabase
+      .from("profiles")
+      .select("email, full_name")
+      .eq("id", offer.performer_id)
+      .single();
+
     await supabase.from("notifications").insert({
       user_id: offer.performer_id,
       type: "offer_accepted",
       title: "Ваше предложение принято",
-      message: `Заказчик принял ваше предложение на заказ. Теперь вы можете получить контакты заказчика.`,
-      link: `/orders/${orderId}`,
+      message: `Заказчик принял ваше предложение на заказ "${offer.order.title}"`,
+      link: `/performer/orders/${offer.order_id}`,
     });
 
     // Send email notification (optional)
     try {
-      const { data: orderDetails } = await supabase
-        .from("orders")
-        .select("title")
-        .eq("id", orderId)
-        .single();
-
-      await fetch(`${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/email/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          type: "offer_accepted",
-          userId: offer.performer_id,
-          data: {
-            orderTitle: orderDetails?.title || "Заказ",
-            orderId: orderId,
-          },
-          locale: "ru",
-        }),
-      });
+      if (performerProfile?.email) {
+        await fetch(`${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/api/email/send`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            to: performerProfile.email,
+            template: "offerAccepted",
+            data: {
+              performerName: performerProfile.full_name,
+              orderTitle: offer.order.title,
+              orderId: offer.order_id,
+            },
+          }),
+        });
+      }
     } catch (emailError) {
-      console.warn("Failed to send email notification:", emailError);
+      console.error("Error sending email:", emailError);
+      // Don't fail the request if email fails
     }
 
     return NextResponse.json({ success: true });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error accepting offer:", error);
     return NextResponse.json(
-      { error: error.message || "Internal server error" },
+      { error: "Internal server error" },
       { status: 500 }
     );
   }
 }
-

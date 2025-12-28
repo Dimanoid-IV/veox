@@ -1,37 +1,46 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { createClient } from "@/lib/supabase/client";
-import { MapPin, Clock, Eye } from "lucide-react";
-import { formatTimeAgo } from "@/lib/utils";
-import { CustomerContacts } from "@/components/orders/CustomerContacts";
-import { CreateOfferModal } from "@/components/orders/CreateOfferModal";
+import Link from "next/link";
+import { useLocale } from "next-intl";
+import { MapPin, Calendar, Euro, User, MessageCircle, CheckCircle } from "lucide-react";
+import CreateOfferModal from "@/components/orders/CreateOfferModal";
 
 interface Order {
   id: string;
   title: string;
   description: string;
   location: string;
-  budget: number | null;
+  budget: number;
   status: string;
   created_at: string;
+  category_id: string;
   customer_id: string;
   customer?: {
     full_name: string;
-    email?: string;
     phone?: string;
+    email?: string;
+  };
+  category?: {
+    name_ru: string;
+    name_et: string;
   };
 }
 
 interface Offer {
   id: string;
+  performer_id: string;
   price: number;
   message: string;
   status: string;
-  performer: {
+  created_at: string;
+  performer?: {
     full_name: string;
     performer_profile?: {
+      company_name: string;
       rating: number;
       total_reviews: number;
     };
@@ -40,135 +49,133 @@ interface Offer {
 
 export default function OrderDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const orderId = params.id as string;
+  const t = useTranslations("common");
+  const locale = useLocale();
   const supabase = createClient();
   const [order, setOrder] = useState<Order | null>(null);
   const [offers, setOffers] = useState<Offer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [hasContactAccess, setHasContactAccess] = useState(false);
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [hasExistingOffer, setHasExistingOffer] = useState(false);
-  const [offerAccepted, setOfferAccepted] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [isPerformer, setIsPerformer] = useState(false);
+  const [isCustomer, setIsCustomer] = useState(false);
   const [showOfferModal, setShowOfferModal] = useState(false);
+  const [userOffer, setUserOffer] = useState<Offer | null>(null);
+  const [acceptedOfferId, setAcceptedOfferId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (orderId) {
-      loadOrder();
-      loadOffers();
-    }
+    loadData();
   }, [orderId]);
 
-  const loadOrder = async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  const loadData = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push(`/${locale}/login`);
+        return;
+      }
+      setCurrentUser(user);
 
-    setCurrentUserId(user?.id || null);
+      // Get user profile
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .single();
 
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*, customer:profiles!orders_customer_id_fkey(full_name, email, phone)")
-      .eq("id", orderId)
-      .single();
+      if (profile?.role === "performer") {
+        setIsPerformer(true);
+      } else if (profile?.role === "customer") {
+        setIsCustomer(true);
+      }
 
-    if (error) {
-      console.error("Error loading order:", error);
-    } else {
-      // Check contact access and user role
-      if (user) {
-        // Get user role
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", user.id)
+      // Get order
+      const { data: orderData, error: orderError } = await supabase
+        .from("orders")
+        .select(`
+          *,
+          customer:profiles!orders_customer_id_fkey(full_name, phone, email),
+          category:categories(name_ru, name_et)
+        `)
+        .eq("id", orderId)
+        .single();
+
+      if (orderError || !orderData) {
+        console.error("Error loading order:", orderError);
+        setLoading(false);
+        return;
+      }
+      setOrder(orderData);
+
+      // If user is customer, get all offers
+      if (profile?.role === "customer" && orderData.customer_id === user.id) {
+        const { data: offersData } = await supabase
+          .from("offers")
+          .select(`
+            *,
+            performer:profiles!offers_performer_id_fkey(
+              full_name,
+              performer_profile:performer_profiles(company_name, rating, total_reviews)
+            )
+          `)
+          .eq("order_id", orderId)
+          .order("created_at", { ascending: false });
+
+        if (offersData) {
+          setOffers(offersData as Offer[]);
+          
+          // Find accepted offer
+          const accepted = offersData.find((o: any) => o.status === "accepted");
+          if (accepted) {
+            setAcceptedOfferId(accepted.id);
+          }
+        }
+      } else if (profile?.role === "performer") {
+        // If user is performer, check if they have an offer
+        const { data: userOfferData } = await supabase
+          .from("offers")
+          .select("*")
+          .eq("order_id", orderId)
+          .eq("performer_id", user.id)
           .single();
 
-        setUserRole(profile?.role || null);
+        if (userOfferData) {
+          setUserOffer(userOfferData as Offer);
+        }
 
-        if (data.customer_id === user.id) {
-          // Customer can always see their own contacts
-          setHasContactAccess(true);
-        } else if (profile?.role === "performer") {
-          // Check if performer purchased access
-          const { data: purchase } = await supabase
-            .from("contact_purchases")
-            .select("id")
-            .eq("order_id", orderId)
-            .eq("performer_id", user.id)
-            .eq("status", "completed")
-            .single();
+        // Check if there's an accepted offer
+        const { data: acceptedOfferData } = await supabase
+          .from("offers")
+          .select("id")
+          .eq("order_id", orderId)
+          .eq("status", "accepted")
+          .single();
 
-          setHasContactAccess(!!purchase);
-
-          // Check if performer already has an offer and if it's accepted
-          const { data: existingOffer } = await supabase
-            .from("offers")
-            .select("id, status")
-            .eq("order_id", orderId)
-            .eq("performer_id", user.id)
-            .single();
-
-          setHasExistingOffer(!!existingOffer);
-          setOfferAccepted(existingOffer?.status === "accepted");
+        if (acceptedOfferData) {
+          setAcceptedOfferId(acceptedOfferData.id);
         }
       }
-      setOrder(data);
-    }
-    setLoading(false);
-  };
-
-  const loadOffers = async () => {
-    try {
-      const supabase = createClient();
-      const { data, error } = await supabase
-        .from("offers")
-        .select(
-          "*, performer:profiles!offers_performer_id_fkey(full_name, performer_profile:performer_profiles(rating, total_reviews))"
-        )
-        .eq("order_id", orderId)
-        .order("created_at", { ascending: false });
-
-      if (error) {
-        console.error("Error loading offers:", error);
-      } else {
-        setOffers(data || []);
-      }
     } catch (error) {
-      console.warn("Supabase not configured:", error);
+      console.error("Error loading data:", error);
+    } finally {
+      setLoading(false);
     }
-  };
-
-  const handleOfferSuccess = () => {
-    loadOffers();
-    loadOrder();
-    setHasExistingOffer(true);
   };
 
   const handleAcceptOffer = async (offerId: string) => {
     try {
       const response = await fetch("/api/offers/accept", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          offerId,
-          orderId,
-        }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ offer_id: offerId }),
       });
 
-      const data = await response.json();
-
       if (!response.ok) {
-        alert(data.error || "Ошибка при принятии предложения");
-        return;
+        throw new Error("Failed to accept offer");
       }
 
-      // Reload offers and order to reflect changes
-      loadOffers();
-      loadOrder();
-      alert("Предложение принято!");
+      await loadData();
     } catch (error) {
       console.error("Error accepting offer:", error);
       alert("Ошибка при принятии предложения");
@@ -192,155 +199,158 @@ export default function OrderDetailPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+      <div className="mb-6">
+        <Link
+          href={`/${locale}/performer/orders`}
+          className="text-primary hover:text-primary-dark"
+        >
+          ← Назад к заказам
+        </Link>
+      </div>
+
       <div className="card mb-6">
         <h1 className="text-3xl font-bold text-gray-900 mb-4">{order.title}</h1>
-        <p className="text-gray-700 whitespace-pre-line mb-6">
-          {order.description}
-        </p>
+        <p className="text-gray-700 mb-4">{order.description}</p>
+
         <div className="flex flex-wrap gap-4 text-sm text-gray-600">
-          <span className="flex items-center gap-1">
-            <Eye className="w-4 h-4" />
-            {order.budget ? `${order.budget}€` : "Не указан"}
-          </span>
-          <span className="flex items-center gap-1">
-            <Clock className="w-4 h-4" />
-            {formatTimeAgo(order.created_at)}
-          </span>
           <span className="flex items-center gap-1">
             <MapPin className="w-4 h-4" />
             {order.location}
           </span>
+          {order.budget && (
+            <span className="flex items-center gap-1">
+              <Euro className="w-4 h-4" />
+              {order.budget}€
+            </span>
+          )}
+          <span className="flex items-center gap-1">
+            <Calendar className="w-4 h-4" />
+            {new Date(order.created_at).toLocaleDateString(locale === "ru" ? "ru-RU" : "et-EE")}
+          </span>
+          {order.category && (
+            <span className="px-2 py-1 bg-gray-100 rounded">
+              {locale === "ru" ? order.category.name_ru : order.category.name_et}
+            </span>
+          )}
         </div>
+
+        {isPerformer && !userOffer && order.status === "open" && (
+          <div className="mt-6">
+            <button
+              onClick={() => setShowOfferModal(true)}
+              className="btn-primary"
+            >
+              Откликнуться на заказ
+            </button>
+          </div>
+        )}
+
+        {isPerformer && userOffer && (
+          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded">
+            <div className="flex items-center gap-2 mb-2">
+              <MessageCircle className="w-4 h-4 text-blue-600" />
+              <span className="font-semibold text-blue-900">
+                Вы откликнулись на этот заказ
+              </span>
+              {userOffer.status === "accepted" && (
+                <span className="flex items-center gap-1 text-green-600">
+                  <CheckCircle className="w-4 h-4" />
+                  Принято заказчиком
+                </span>
+              )}
+            </div>
+            {userOffer.price && (
+              <p className="text-sm text-blue-800">Ваша цена: {userOffer.price}€</p>
+            )}
+            {userOffer.message && (
+              <p className="text-sm text-blue-700 mt-1">{userOffer.message}</p>
+            )}
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          {offers.length > 0 && (
-            <div className="card mb-6">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">
-                Предложения ({offers.length})
-              </h2>
-              <div className="space-y-4">
-                {offers.map((offer) => (
-                  <div
-                    key={offer.id}
-                    className={`border rounded-lg p-4 ${
-                      offer.status === "accepted"
-                        ? "border-green-500 bg-green-50"
-                        : offer.status === "rejected"
-                        ? "border-gray-200 bg-gray-50 opacity-60"
-                        : "border-gray-200"
-                    }`}
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-semibold text-gray-900">
-                            {offer.performer.full_name}
-                          </h3>
-                          {offer.status === "accepted" && (
-                            <span className="px-2 py-1 bg-green-500 text-white text-xs rounded">
-                              Принято
-                            </span>
-                          )}
-                          {offer.status === "rejected" && (
-                            <span className="px-2 py-1 bg-gray-400 text-white text-xs rounded">
-                              Отклонено
-                            </span>
-                          )}
-                        </div>
-                        {offer.performer.performer_profile && (
-                          <p className="text-sm text-gray-600">
-                            ⭐ {offer.performer.performer_profile.rating} (
-                            {offer.performer.performer_profile.total_reviews}{" "}
-                            отзывов)
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <p className="text-xl font-bold text-primary">
-                          {offer.price ? `${offer.price}€` : "Цена договорная"}
-                        </p>
-                      </div>
-                    </div>
-                    <p className="text-gray-700 mb-4">{offer.message}</p>
-                    {userRole === "customer" &&
-                      order?.status === "open" &&
-                      offer.status === "pending" && (
-                        <button
-                          onClick={() => handleAcceptOffer(offer.id)}
-                          className="btn-primary"
-                        >
-                          Принять предложение
-                        </button>
-                      )}
-                    {offer.status === "accepted" && (
-                      <p className="text-sm text-green-700 font-medium">
-                        ✓ Это предложение принято
+      {isCustomer && offers.length > 0 && (
+        <div className="card">
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">
+            Отклики ({offers.length})
+          </h2>
+          <div className="space-y-4">
+            {offers.map((offer) => (
+              <div
+                key={offer.id}
+                className={`p-4 border rounded ${
+                  offer.status === "accepted"
+                    ? "bg-green-50 border-green-200"
+                    : "bg-gray-50 border-gray-200"
+                }`}
+              >
+                <div className="flex justify-between items-start mb-2">
+                  <div>
+                    <h3 className="font-semibold text-gray-900">
+                      {offer.performer?.full_name}
+                    </h3>
+                    {offer.performer?.performer_profile?.company_name && (
+                      <p className="text-sm text-gray-600">
+                        {offer.performer.performer_profile.company_name}
                       </p>
                     )}
-                    {offer.status === "rejected" && (
-                      <p className="text-sm text-gray-500">
-                        Это предложение отклонено
-                      </p>
+                    {offer.performer?.performer_profile && (
+                      <div className="text-sm text-gray-600 mt-1">
+                        ⭐ {offer.performer.performer_profile.rating.toFixed(1)} (
+                        {offer.performer.performer_profile.total_reviews} отзывов)
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+                  {offer.status === "accepted" && (
+                    <span className="flex items-center gap-1 text-green-600">
+                      <CheckCircle className="w-4 h-4" />
+                      Принято
+                    </span>
+                  )}
+                </div>
 
-        <div className="lg:col-span-1">
-          {order && currentUserId && (
-            <>
-              {userRole === "performer" &&
-                !hasExistingOffer &&
-                (order.status === "open" || order.status === "in_progress") && (
-                <div className="card mb-6">
-                  <h3 className="font-semibold text-gray-900 mb-4">
-                    Хотите откликнуться?
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-4">
-                    Предложите свою цену и условия выполнения заказа
+                {offer.price && (
+                  <p className="text-lg font-semibold text-gray-900 mb-2">
+                    {offer.price}€
                   </p>
-                  <button
-                    onClick={() => setShowOfferModal(true)}
-                    className="btn-primary w-full"
+                )}
+
+                {offer.message && (
+                  <p className="text-gray-700 mb-3">{offer.message}</p>
+                )}
+
+                {isCustomer &&
+                  offer.status !== "accepted" &&
+                  !acceptedOfferId && (
+                    <button
+                      onClick={() => handleAcceptOffer(offer.id)}
+                      className="btn-primary"
+                    >
+                      Принять предложение
+                    </button>
+                  )}
+
+                {isCustomer && offer.status === "accepted" && (
+                  <Link
+                    href={`/${locale}/orders/${orderId}/review`}
+                    className="btn-outline"
                   >
-                    Откликнуться на заказ
-                  </button>
-                </div>
-              )}
-              {userRole === "performer" && hasExistingOffer && (
-                <div className="card mb-6 bg-green-50 border border-green-200">
-                  <p className="text-sm text-green-800">
-                    ✓ Вы уже откликнулись на этот заказ
-                  </p>
-                </div>
-              )}
-              <CustomerContacts
-                orderId={orderId}
-                customer={order.customer || { full_name: "Заказчик" }}
-                hasAccess={hasContactAccess}
-                offerAccepted={offerAccepted}
-              />
-            </>
-          )}
+                    Оставить отзыв
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-
-      {order && (
-        <CreateOfferModal
-          orderId={orderId}
-          orderTitle={order.title}
-          isOpen={showOfferModal}
-          onClose={() => setShowOfferModal(false)}
-          onSuccess={handleOfferSuccess}
-        />
       )}
+
+      <CreateOfferModal
+        isOpen={showOfferModal}
+        onClose={() => setShowOfferModal(false)}
+        orderId={orderId}
+        onSuccess={loadData}
+      />
     </div>
   );
 }
-
