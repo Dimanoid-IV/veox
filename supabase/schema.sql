@@ -144,7 +144,9 @@ CREATE POLICY "Users can view other profiles"
   USING (true);
 
 -- Orders policies
-CREATE POLICY "Customers can view all open orders"
+-- Allow everyone to view open orders (for performers to see available orders)
+-- And allow customers to view their own orders regardless of status
+CREATE POLICY "Users can view open orders and their own orders"
   ON orders FOR SELECT
   USING (status = 'open' OR customer_id = auth.uid());
 
